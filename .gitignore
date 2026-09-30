@@ -1,0 +1,23 @@
+# Dependencies and build output
+/node_modules/
+/dist/
+/.vite/
+
+# Environment overrides
+.env
+.env.local
+.env.development.local
+.env.production.local
+.env.test.local
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+.classpath
+.project
+.settings/
+
+# OS
+.DS_Store
+*.log
