@@ -12,7 +12,7 @@ export const orderService = {
     const response = await api.get<Order[]>(`${ORDER_SERVICE_URL}`);
     return response.data;
   },
-  getOrderById: async (id: string): Promise<Order> => {
+  getOrderById: async (id: number | string): Promise<Order> => {
     const response = await api.get<Order>(`${ORDER_SERVICE_URL}/${id}`);
     return response.data;
   }

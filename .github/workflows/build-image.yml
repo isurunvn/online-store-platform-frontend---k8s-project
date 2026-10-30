@@ -1,0 +1,94 @@
+name: Build ARM64 frontend image for OCIR
+
+# Publishing is an explicit first-rollout action. A push alone does not run it.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-ocir-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: prod
+    env:
+      OCIR_REGISTRY: ${{ vars.OCIR_REGISTRY }}
+      OCIR_NAMESPACE: ${{ vars.OCIR_NAMESPACE }}
+      OCIR_REPOSITORY: ${{ vars.OCIR_REPOSITORY }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Validate registry settings
+        id: image
+        shell: bash
+        env:
+          OCIR_USERNAME: ${{ secrets.OCIR_USERNAME }}
+          OCIR_AUTH_TOKEN: ${{ secrets.OCIR_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          for name in OCIR_REGISTRY OCIR_NAMESPACE OCIR_REPOSITORY OCIR_USERNAME OCIR_AUTH_TOKEN; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing ${name}. Configure the repository Actions settings documented in README.md."
+              exit 1
+            fi
+          done
+          if [[ "$OCIR_REGISTRY" == *"://"* || "$OCIR_REGISTRY" == */* ]]; then
+            echo "::error::OCIR_REGISTRY must be a hostname, for example phx.ocir.io."
+            exit 1
+          fi
+          echo "tag=${OCIR_REGISTRY}/${OCIR_NAMESPACE}/${OCIR_REPOSITORY}:sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to the existing OCIR registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.OCIR_REGISTRY }}
+          username: ${{ secrets.OCIR_USERNAME }}
+          password: ${{ secrets.OCIR_AUTH_TOKEN }}
+
+      - name: Build and publish ARM64 image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          push: true
+          pull: true
+          tags: ${{ steps.image.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=frontend-arm64
+          cache-to: type=gha,mode=max,scope=frontend-arm64
+          # Publish a straightforward image manifest for this first OCIR rollout.
+          provenance: false
+          sbom: false
+
+      - name: Record image for the GitOps rollout
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          {
+            echo '### Frontend image published'
+            echo
+            echo "Tagged image: \`${IMAGE_TAG}\`"
+            echo
+            echo "Deployment image: \`${OCIR_REGISTRY}/${OCIR_NAMESPACE}/${OCIR_REPOSITORY}@${IMAGE_DIGEST}\`"
+            echo
+            echo 'Platform: linux/arm64. Use the deployment image digest in the GitOps manifest.'
+          } >> "$GITHUB_STEP_SUMMARY"

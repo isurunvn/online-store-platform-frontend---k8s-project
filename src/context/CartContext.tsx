@@ -1,4 +1,4 @@
-import React, { createContext, useReducer, ReactNode } from 'react';
+import React, { createContext, useReducer, useEffect, ReactNode } from 'react';
 import { CartItem, Product } from '../types';
 
 interface CartState {
@@ -7,15 +7,15 @@ interface CartState {
 
 type CartAction =
   | { type: 'ADD_ITEM'; payload: { product: Product; quantity: number } }
-  | { type: 'REMOVE_ITEM'; payload: string } // productId
-  | { type: 'UPDATE_QUANTITY'; payload: { productId: string; quantity: number } }
+  | { type: 'REMOVE_ITEM'; payload: number } // productId
+  | { type: 'UPDATE_QUANTITY'; payload: { productId: number; quantity: number } }
   | { type: 'CLEAR_CART' };
 
 interface CartContextProps {
   cartItems: CartItem[];
   addToCart: (product: Product, quantity: number) => void;
-  removeFromCart: (productId: string) => void;
-  updateQuantity: (productId: string, quantity: number) => void;
+  removeFromCart: (productId: number) => void;
+  updateQuantity: (productId: number, quantity: number) => void;
   clearCart: () => void;
   totalItems: number;
   totalPrice: number;
@@ -30,9 +30,9 @@ const cartReducer = (state: CartState, action: CartAction): CartState => {
         item => item.product.id === action.payload.product.id
       );
       if (existingItemIndex >= 0) {
-        const newItems = [...state.items];
-        newItems[existingItemIndex].quantity += action.payload.quantity;
-        return { ...state, items: newItems };
+        return { ...state, items: state.items.map((item, index) => index === existingItemIndex
+          ? { ...item, quantity: Math.min(action.payload.product.stockQuantity, item.quantity + action.payload.quantity) }
+          : item) };
       }
       return { ...state, items: [...state.items, action.payload] };
     }
@@ -46,7 +46,7 @@ const cartReducer = (state: CartState, action: CartAction): CartState => {
         ...state,
         items: state.items.map(item =>
           item.product.id === action.payload.productId
-            ? { ...item, quantity: action.payload.quantity }
+            ? { ...item, quantity: Math.max(1, Math.min(item.product.stockQuantity, action.payload.quantity)) }
             : item
         )
       };
@@ -58,17 +58,25 @@ const cartReducer = (state: CartState, action: CartAction): CartState => {
 };
 
 export const CartProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [state, dispatch] = useReducer(cartReducer, { items: [] });
+  const [state, dispatch] = useReducer(cartReducer, { items: [] }, () => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('online-store-cart') || '[]');
+      return { items: Array.isArray(saved) ? saved.filter(item => item?.product && Number.isInteger(item.quantity) && item.quantity > 0) : [] };
+    } catch { return { items: [] }; }
+  });
+  useEffect(() => {
+    sessionStorage.setItem('online-store-cart', JSON.stringify(state.items));
+  }, [state.items]);
 
   const addToCart = (product: Product, quantity: number) => {
     dispatch({ type: 'ADD_ITEM', payload: { product, quantity } });
   };
 
-  const removeFromCart = (productId: string) => {
+  const removeFromCart = (productId: number) => {
     dispatch({ type: 'REMOVE_ITEM', payload: productId });
   };
 
-  const updateQuantity = (productId: string, quantity: number) => {
+  const updateQuantity = (productId: number, quantity: number) => {
     dispatch({ type: 'UPDATE_QUANTITY', payload: { productId, quantity } });
   };
 

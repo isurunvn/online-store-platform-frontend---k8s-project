@@ -1,5 +1,5 @@
 export interface User {
-  id: string;
+  id: number;
   keycloakUserId: string;
   firstName: string;
   lastName: string;
@@ -8,7 +8,7 @@ export interface User {
 }
 
 export interface Address {
-  id?: string;
+  id?: number;
   street: string;
   city: string;
   state: string;
@@ -17,32 +17,32 @@ export interface Address {
 }
 
 export interface Category {
-  id: string;
+  id: number;
   name: string;
   description?: string;
 }
 
 export interface Product {
-  id: string;
+  id: number;
   name: string;
   description: string;
   price: number;
   stockQuantity: number;
-  categoryId: string;
+  categoryId: number;
   categoryName?: string;
   createdAt?: string;
   updatedAt?: string;
 }
 
 export interface OrderItem {
-  id?: string;
-  productId: string;
+  id?: number;
+  productId: number;
   quantity: number;
   unitPrice: number;
 }
 
 export interface Order {
-  id: string;
+  id: number;
   userId: string;
   orderStatus: string;
   totalAmount: number;
@@ -56,11 +56,11 @@ export interface CartItem {
 }
 
 export interface CreateOrderRequest {
-  orderItems: CreateOrderItemRequest[];
+  items: CreateOrderItemRequest[];
 }
 
 export interface CreateOrderItemRequest {
-  productId: string;
+  productId: number;
   quantity: number;
 }
 
@@ -69,7 +69,8 @@ export interface PagedResponse<T> {
   totalElements: number;
   totalPages: number;
   size: number;
-  number: number;
+  page: number;
+  last: boolean;
 }
 
 export interface ApiError {

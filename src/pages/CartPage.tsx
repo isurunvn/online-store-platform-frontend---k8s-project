@@ -25,7 +25,7 @@ const CartPage: React.FC = () => {
       setError(null);
       
       await orderService.createOrder({
-        orderItems: cartItems.map(item => ({
+        items: cartItems.map(item => ({
           productId: item.product.id,
           quantity: item.quantity
         }))
@@ -73,7 +73,7 @@ const CartPage: React.FC = () => {
                     {item.product.name}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    $\{(item.product.price).toFixed(2)} each
+                    ${(item.product.price).toFixed(2)} each
                   </Typography>
                 </Grid>
                 <Grid item xs={12} sm={4}>
@@ -97,7 +97,7 @@ const CartPage: React.FC = () => {
                 </Grid>
                 <Grid item xs={12} sm={2} display="flex" justifyContent="flex-end">
                   <Typography variant="subtitle1" fontWeight="bold" sx={{ mr: 2, display: { sm: 'none' } }}>
-                    $\{(item.product.price * item.quantity).toFixed(2)}
+                    ${(item.product.price * item.quantity).toFixed(2)}
                   </Typography>
                   <IconButton color="error" onClick={() => removeFromCart(item.product.id)}>
                     <Delete />

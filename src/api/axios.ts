@@ -2,11 +2,14 @@ import axios from 'axios';
 import keycloak from '../keycloak';
 
 const api = axios.create({
-  baseURL: '/api', // Can be proxied via Vite or Nginx
+  baseURL: '/', // Service paths already include /api; Gateway routes them unchanged.
 });
 
 api.interceptors.request.use(
   async (config) => {
+    if (keycloak.authenticated) {
+      await keycloak.updateToken(30);
+    }
     if (keycloak.token) {
       config.headers.Authorization = `Bearer ${keycloak.token}`;
     }
