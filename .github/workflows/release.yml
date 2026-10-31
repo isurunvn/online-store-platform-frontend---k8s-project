@@ -1,0 +1,23 @@
+name: Record versioned release
+on:
+  release:
+    types: [published]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+          persist-credentials: false
+      - run: python3 ci/install-tools.py cosign
+      - name: Attach existing verified image identity without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          COMPONENT: frontend
+        run: python3 ci/release.py

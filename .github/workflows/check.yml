@@ -1,17 +1,44 @@
 name: Validate application
 on:
   pull_request:
+    branches: [main]
   push:
     branches: [main]
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
+    name: Application CI
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          fetch-depth: 0
           persist-credentials: false
-      - name: Compile and test without publishing
-        run: docker build --target builder --tag local-validation .
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22.21.1'
+          cache: npm
+      - run: npm ci
+      - run: npm test && npm run build
+      - name: Install checksum-verified scanners
+        run: python3 ci/install-tools.py trivy gitleaks actionlint
+      - name: Install local SAST engine
+        run: pipx install semgrep==1.183.0
+      - run: python3 -m unittest discover -s ci -p 'test_*.py'
+      - run: actionlint
+      - name: Source security checks
+        run: python3 ci/scan.py source
+      - name: Validate final Dockerfile without publishing
+        run: docker build --tag local-validation .
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: security-reports
+          path: .ci-output/
+          include-hidden-files: true
+          retention-days: 14

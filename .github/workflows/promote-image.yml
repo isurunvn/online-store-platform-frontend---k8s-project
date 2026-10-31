@@ -1,0 +1,61 @@
+name: Prepare GitOps promotion PR
+on:
+  workflow_run:
+    workflows: [Publish verified ARM64 image]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: promotion-frontend
+  cancel-in-progress: false
+jobs:
+  promote:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == 'main'
+    environment: prod
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Check owner configuration
+        env:
+          APP_ID: ${{ vars.PROMOTION_APP_ID }}
+          APP_KEY: ${{ secrets.PROMOTION_APP_PRIVATE_KEY }}
+        run: |
+          test -n "$APP_ID" && test -n "$APP_KEY" || { echo '::error::Configure the scoped promotion GitHub App; see DELIVERY.md'; exit 1; }
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        id: app
+        with:
+          app-id: ${{ vars.PROMOTION_APP_ID }}
+          private-key: ${{ secrets.PROMOTION_APP_PRIVATE_KEY }}
+          owner: isurunvn
+          repositories: online-store-platform-gitops---k8s-project
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Install GitOps rendering tools
+        run: |
+          python3 ci/install-tools.py kustomize kubeconform cosign
+          python3 -m pip install PyYAML==6.0.3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+        with:
+          version: v0.38.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6
+        with:
+          registry: phx.ocir.io
+          username: ${{ secrets.OCIR_USERNAME }}
+          password: ${{ secrets.OCIR_AUTH_TOKEN }}
+      - name: Verify build evidence and prepare PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_TOKEN: ${{ github.token }}
+          GITOPS_TOKEN: ${{ steps.app.outputs.token }}
+          COMPONENT: frontend
+          PUBLISH_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: python3 ci/promote.py

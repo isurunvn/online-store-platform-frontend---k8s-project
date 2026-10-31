@@ -21,3 +21,9 @@
 # OS
 .DS_Store
 *.log
+
+# Local CI reports may contain private metadata.
+.ci-output/
+
+__pycache__/
+*.pyc

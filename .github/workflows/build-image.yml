@@ -1,94 +1,93 @@
-name: Build ARM64 frontend image for OCIR
-
-# Publishing is an explicit first-rollout action. A push alone does not run it.
+name: Publish verified ARM64 image
 on:
+  workflow_run:
+    workflows: [Validate application]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
-
 permissions:
   contents: read
-
+  actions: read
+  id-token: write
 concurrency:
-  group: frontend-ocir-${{ github.ref }}
+  group: publish-frontend-main
   cancel-in-progress: false
-
 jobs:
   publish:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     environment: prod
     env:
+      COMPONENT: frontend
       OCIR_REGISTRY: ${{ vars.OCIR_REGISTRY }}
       OCIR_NAMESPACE: ${{ vars.OCIR_NAMESPACE }}
       OCIR_REPOSITORY: ${{ vars.OCIR_REPOSITORY }}
     steps:
-      - name: Check out source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-
-      - name: Validate registry settings
-        id: image
-        shell: bash
+      - name: Require successful CI and current main
+        id: authorize
         env:
-          OCIR_USERNAME: ${{ secrets.OCIR_USERNAME }}
-          OCIR_AUTH_TOKEN: ${{ secrets.OCIR_AUTH_TOKEN }}
-        run: |
-          set -euo pipefail
-          for name in OCIR_REGISTRY OCIR_NAMESPACE OCIR_REPOSITORY OCIR_USERNAME OCIR_AUTH_TOKEN; do
-            if [[ -z "${!name}" ]]; then
-              echo "::error::Missing ${name}. Configure the repository Actions settings documented in README.md."
-              exit 1
-            fi
-          done
-          if [[ "$OCIR_REGISTRY" == *"://"* || "$OCIR_REGISTRY" == */* ]]; then
-            echo "::error::OCIR_REGISTRY must be a hostname, for example phx.ocir.io."
-            exit 1
-          fi
-          echo "tag=${OCIR_REGISTRY}/${OCIR_NAMESPACE}/${OCIR_REPOSITORY}:sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-
-      - name: Log in to the existing OCIR registry
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ci/publish.py authorize
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ steps.authorize.outputs.sha }}
+          persist-credentials: false
+      - run: python3 ci/install-tools.py trivy
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+        with:
+          version: v0.38.1
+      - name: Build one single-platform Docker archive
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: .
+          platforms: linux/arm64
+          outputs: type=docker,dest=${{ runner.temp }}/image.tar
+          tags: ${{ steps.authorize.outputs.tag }}
+          pull: true
+          push: false
+          provenance: false
+          sbom: false
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.authorize.outputs.sha }}
+          cache-from: type=gha,scope=frontend-arm64
+          cache-to: type=gha,mode=max,scope=frontend-arm64
+      - name: Scan exact archive and generate SBOM
+        env:
+          IMAGE_ARCHIVE: ${{ runner.temp }}/image.tar
+        run: python3 ci/scan.py image "$IMAGE_ARCHIVE"
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6
         with:
           registry: ${{ env.OCIR_REGISTRY }}
           username: ${{ secrets.OCIR_USERNAME }}
           password: ${{ secrets.OCIR_AUTH_TOKEN }}
-
-      - name: Build and publish ARM64 image
-        id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/arm64
-          push: true
-          pull: true
-          tags: ${{ steps.image.outputs.tag }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha,scope=frontend-arm64
-          cache-to: type=gha,mode=max,scope=frontend-arm64
-          # Publish a straightforward image manifest for this first OCIR rollout.
-          provenance: false
-          sbom: false
-
-      - name: Record image for the GitOps rollout
-        shell: bash
+      - name: Publish without rebuilding and verify registry config digest
         env:
-          IMAGE_TAG: ${{ steps.image.outputs.tag }}
-          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+          ENABLE_EVIDENCE_SIGNING: ${{ vars.ENABLE_EVIDENCE_SIGNING }}
+          SOURCE_SHA: ${{ steps.authorize.outputs.sha }}
+          IMAGE_TAG: ${{ steps.authorize.outputs.tag }}
+          CI_RUN_ID: ${{ steps.authorize.outputs.ci_run }}
+          IMAGE_ARCHIVE: ${{ runner.temp }}/image.tar
+        run: python3 ci/publish.py finalize
+      - name: Sign release evidence (explicit opt-in, public Sigstore log)
+        if: vars.ENABLE_EVIDENCE_SIGNING == 'true'
         run: |
-          set -euo pipefail
-          {
-            echo '### Frontend image published'
-            echo
-            echo "Tagged image: \`${IMAGE_TAG}\`"
-            echo
-            echo "Deployment image: \`${OCIR_REGISTRY}/${OCIR_NAMESPACE}/${OCIR_REPOSITORY}@${IMAGE_DIGEST}\`"
-            echo
-            echo 'Platform: linux/arm64. Use the deployment image digest in the GitOps manifest.'
-          } >> "$GITHUB_STEP_SUMMARY"
+          python3 ci/install-tools.py cosign
+          "$RUNNER_TEMP/online-store-ci-bin/cosign" sign-blob --yes --bundle .ci-output/signature.bundle.json .ci-output/evidence.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: release-evidence
+          path: .ci-output/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90
