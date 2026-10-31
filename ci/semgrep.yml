@@ -1,0 +1,21 @@
+rules:
+  - id: javascript-dynamic-eval
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Avoid eval; executable strings can introduce code injection.
+    pattern: eval(...)
+  - id: javascript-document-write
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Avoid document.write; use safe DOM APIs with textContent.
+    pattern: document.write(...)
+  - id: java-request-command-execution
+    languages: [java]
+    severity: ERROR
+    message: Request parameters must not become operating-system commands.
+    pattern: Runtime.getRuntime().exec($REQ.getParameter(...))
+  - id: java-request-sql-execution
+    languages: [java]
+    severity: ERROR
+    message: Use parameterized queries instead of request values in SQL.
+    pattern: $STMT.executeQuery($REQ.getParameter(...))
